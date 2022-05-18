@@ -1,37 +1,26 @@
-## Welcome to GitHub Pages
+---
+title: Home
+---
 
-You can use the [editor on GitHub](https://github.com/ccreaper/isu/edit/main/docs/index.md) to maintain and preview the content for your website in Markdown files.
+`isu` is a minimal, lightweight library for building reactive user interfaces in the Roblox engine. [Inspired by React's functional components and hook system](https://reactjs.org/docs/hooks-intro.html), it allows for the composition of components through pure functions and avoids most of the overhead and redundancy introduced by class-based components or object-based data structures. Part of the `isu` philosophy is to use functions wherever possible to create, access, and store reactive data, and to abstract away the process of Instance creation through the library's automatism.
 
-Whenever you commit to this repository, GitHub Pages will run [Jekyll](https://jekyllrb.com/) to rebuild the pages in your site, from the content in your Markdown files.
+## Notable features
 
-### Markdown
+**Note:** This is the _intended_ feature list. Some functionality may be under construction or simply not available at the moment.
 
-Markdown is a lightweight and easy-to-use syntax for styling your writing. It includes conventions for
+- **Essential hooks for stateful components.** `isu` implements reactive hooks such as `useState` and `useEffect` for the creation of stateful, _functional_ components. Using a context system powered by coroutines, `isu` is capable of retrieving information across renderer invocations without relying on developer-facing data structures or extendable objects, which increases reliance on pure functions, a target of `isu`'s philosophy.
+- **Useful hooks for the Roblox ecosystem.** `isu` extends its collection of React-inspired hooks with several new ones such as `useEvent` and `useTransition` which allows users to reactively access engine events and create animations using a functional approach. They both use logic deeply integrated in the library and close to the DataModel, which means there is very little overhead between the callback invocation and the effect on the component.
+- **Native transition and animation support.** `isu`'s mutation process considers transitions and animations defined through their respective hooks. The library will automatically and intelligently tween properties during state changes, or handle user-triggered animations when they are invoked through reactive code.
+- **No-brainer tree composition.** `isu` considers the two parts of the returned property table from a renderer: the _dictionary_ part is used to express properties, and the _array_ part is used to express children. This means you don't have to supply an extra argument or a `Children` field to setup a tree, you only have to list the components directly in the table as an array, which is more intuitive and allows `O(n)` parsing of the property table. Of course, everything is supported in our reconciliation and diffing process.
+- **`Suspense`-like component for asynchronous code.** `isu` comes prepacked with a `Suspense`-like component that renders a temporary component until something completes if some part of your renderer has to run asynchronously to perform an expensive computation, or fetches data from the server (_or an external website_). For instances requiring hydration, you can opt into using `Suspense`'s behavior to render something until a component is fully hydrated.
+- **Extensible nature for adapting the library to other ecosystems.** Even though `isu` creates and updates componentized Instances by default, it offers an interface for defining reconciliation and mutation of user-supplied structures. If you wish to apply reactivity to a table or any other object of your choice (a process called _componentization_), you simply have to provide a handful of callbacks to the library and you'll be defining and instanciating components in no time.
 
-```markdown
-Syntax highlighted code block
+## Should I replace Roact/Fusion with `isu`?
 
-# Header 1
-## Header 2
-### Header 3
+**`isu` was not created to replace already existing frameworks such as Roact and Fusion.** Roact and Fusion are good, and a lot of Roblox developers find them easy enough to use regularly. `isu`, rather, offers an alternative to developers that disagree with some of the design choices taken by Roact and Fusion, namely:
+- **Reliance on class components.** _Roact_ offers an object-based extendable component base for the creation of new components, with assignable methods that specify the behavior of the component. Some developers may observe this may add unnecessary overhead, or hardens tree-shaking efforts. Some may simply not wish to use an heavily object-based system. This is not a problem with _Fusion_.
+- **Inherent design problems.** _Roact_ is notable for being difficult to work with when it comes to certain tasks that are relatively easy to accomplish outside of the framework. For instance, when it comes to animations, developers often need third party libraries to make tweening and animating convenient. `isu` solves this by integrating animations and transitions directly in its library, in the form of `useTransition` and `useAnimation` hooks.
+- **Hook unavailability.** Both _Roact_ and _Fusion_ implement statefulness through structures that are not contextual, distancing themselves from the simplicity of the hook paradigm pioneered by React. _Roact_, for instance, stores the component state directly in the object as a table, whereas _Fusion_ relies on object-based data structures with methods. Neither solution is as simple and straight-forward as a `useState` hook invoked within the renderer, returning only a value and an updater, which `isu` provides out of the box.
+- **Size.** Both _Roact_ and _Fusion_ are pretty big libraries, split across several modules that are required at runtime. While the added weight is probably negligible to large-scale games, some developers may prefer a lightweight alternative. `isu` is designed to be minimal and very portable, entirely written in a **single** file, with minified distributions often weighting less than _8 kilobytes_.
 
-- Bulleted
-- List
-
-1. Numbered
-2. List
-
-**Bold** and _Italic_ and `Code` text
-
-[Link](url) and ![Image](src)
-```
-
-For more details see [Basic writing and formatting syntax](https://docs.github.com/en/github/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax).
-
-### Jekyll Themes
-
-Your Pages site will use the layout and styles from the Jekyll theme you have selected in your [repository settings](https://github.com/ccreaper/isu/settings/pages). The name of this theme is saved in the Jekyll `_config.yml` configuration file.
-
-### Support or Contact
-
-Having trouble with Pages? Check out our [documentation](https://docs.github.com/categories/github-pages-basics/) or [contact support](https://support.github.com/contact) and we’ll help you sort it out.
+`isu` also aims to be _batteries-included_. That means the library should maintain a selection of prepacked components that are ready to be used without much configuration yet stay highly extensible, both for accelerating development and providing complete examples for developers learning the framework. A regular effort is committed to curate important components, so the selection may grow or shrink over time.
