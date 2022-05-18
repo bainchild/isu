@@ -6,6 +6,7 @@ local getType = typeof or type
 local coroRunning = coroutine.running
 local instanceNew = Instance.new
 local pairs = pairs
+local getmt = getmetatable
 local setmt = setmetatable
 local tweenService = game:GetService("TweenService")
 
@@ -15,12 +16,15 @@ local _contextStorage = {}
 ---@class WeakTable
 ---@field v any
 
+local WEAK_MT_K = {__mode = 'k'}
+local WEAK_MT_V = {__mode = 'v'}
+local WEAK_MT_KV = {__mode = 'kv'}
 -- Creates a weak reference holder (weak table) and returns it.
 -- Data is pointed to by `self.v`, but can be stored anywhere in the table.
 ---@param value any
 ---@return WeakTable
 local function weakRef(value)
-    return setmt({v = value}, {__mode = 'v'})
+    return setmt({v = value}, WEAK_MT_V)
 end
 
 -- Clones a table. If `deep` is truthy, all nested tables will be cloned too.
@@ -46,7 +50,7 @@ end
 ---@field stack table
 ---@return Accumulator
 local function accumulator()
-    local obj = {stack={}, coro=setmt({},{__mode='v'})}
+    local obj = {stack={}, coro=setmt({},WEAK_MT_KV)}
 
     function obj:at(i)
         return self.stack[i]
@@ -123,7 +127,13 @@ do --> context-aware instance creation
             if getType(key) == 'number' then
                 delta().Parent = inst
             else
-                inst[key] = delta -- todo: event shit
+                if getType(delta) == 'table' 
+                    and getmt(delta)
+                    and getmt(delta).__type == 'Subscription' then
+                        inst[key] = delta.represents.value
+                else
+                    inst[key] = delta
+                end
             end
         end
         return inst
@@ -137,8 +147,8 @@ do --> context-aware instance creation
     function makeInstance(className, properties)
         local ctx = getContext()
         local current = ctx.objects:next()
-        properties = properties or {}
         if not current then
+            properties = properties or {}
             current = make(className, properties)
             ctx.objects:push(current)
             current.Destroying:Connect(function()
@@ -182,6 +192,7 @@ local function performTransition(instance, property, toValue, transition)
     return true
 end
 
+local subscriptionComputeDerivative
 -- Mutates an instance conditionally, only overwriting fields when they have changed,
 ---@param src Instance
 ---@param new table
@@ -191,7 +202,20 @@ local function mutateConditionally(src, new)
     for key, delta in pairs(new) do
         if getType(key) ~= 'number' then
             local t1, t2 = getType(src[key]), getType(delta)
-            if t1 ~= t2 then
+            if t2 == 'table' then
+                -- check if special object
+                local mt = getmt(delta)
+                if mt and mt.__type then
+                    if mt.__type == 'Subscription' then
+                        delta.represents.listeners[key] = function()
+                            src[key] = subscriptionComputeDerivative(delta)
+                        end
+                        src[key] = subscriptionComputeDerivative(delta)
+                    end
+                else
+                    src[key] = delta
+                end
+            elseif t1 ~= t2 then
                 -- mutate due to differing types
                 src[key] = delta
             elseif src[key] ~= delta then
@@ -211,6 +235,65 @@ local function mutateConditionally(src, new)
         end
     end
     return src
+end
+
+local subscriptionDerivative
+local SUBSCRIPTION_MT_OP = function (op)
+    return function(derivative, arg)
+        return subscriptionDerivative(derivative, op, arg)
+    end
+end
+local SUBSCRIPTION_MT = {
+    __type = 'Subscription',
+    __add = SUBSCRIPTION_MT_OP('add'),
+    __sub = SUBSCRIPTION_MT_OP('sub'),
+    __mul = SUBSCRIPTION_MT_OP('mul'),
+    __div = SUBSCRIPTION_MT_OP('div'),
+    __pow = SUBSCRIPTION_MT_OP('pow'),
+}
+
+function subscriptionDerivative(src, op, arg)
+    if src.op then
+        local derivative = setmt({
+            root = src.root,
+            op = op,
+            arg = arg
+        }, SUBSCRIPTION_MT)
+        src.next = derivative
+        return derivative
+    else
+        return setmt({
+            root = src,
+            op = op,
+            arg = arg
+        }, SUBSCRIPTION_MT)
+    end
+end
+
+function subscriptionComputeDerivative(src)
+    if src.value then
+        return src.value
+    end
+    local step = src.root
+    local value = step.value
+    while step.next do
+        step = step.next
+        local op = step.op
+        if op == 'add' then
+            value = value + step.arg
+        elseif op == 'sub' then
+            value = value - step.arg
+        elseif op == 'mul' then
+            value = value * step.arg
+        elseif op == 'div' then
+            value = value / step.arg
+        elseif op == 'pow' then
+            value = value ^ step.arg
+        else
+            error('Unsupported operation on derivative.')
+        end
+    end
+    return value
 end
 
 -----------------------------------------------
@@ -255,10 +338,13 @@ function isu.useEffect(fn, states)
     local ctx = getContext()
     local current = ctx.effects:next()
     if not current then
-        ctx.effects:push(true)
-        local unmounter = fn()
-        if unmounter and not ctx.unmounts:next() then
-            ctx.unmounts:push(unmounter)
+        ctx.effects:push({fn=fn,states=states or {}})
+    elseif states then
+        for i = 1, #states do
+            if current.states[i] ~= states[i] then
+                current.fn()
+                break
+            end
         end
     end
 end
@@ -316,6 +402,33 @@ function isu.useTransition(propertyName, tweenCalculator)
     end
 end
 
+function isu.useSubscription(value)
+    local ctx = getContext()
+    local current, i = ctx.subscriptions:next()
+    if current then
+        return current.proxy, current.updater
+    else
+        local subscription = {}
+        subscription.listeners = {}
+        subscription.value = value
+        subscription.proxy = setmt({
+            value = value,
+            represents = subscription
+        }, SUBSCRIPTION_MT)
+        subscription.updater = function(newValue)
+            if ctx.subscriptions:at(i).value ~= newValue then
+                subscription.value = newValue
+                subscription.proxy.value = newValue
+                for _, listener in pairs(subscription.listeners) do
+                    listener(newValue)
+                end
+            end
+        end
+        ctx.subscriptions:push(subscription)
+        return subscription.proxy, subscription.updater
+    end
+end
+
 -- Creates a new component and returns its factory, a function used to construct
 -- component instances. Calling the factory instanciates a component with an initial
 -- dictionary of user-defined props passed as a parameter, and returns a function that can
@@ -365,6 +478,7 @@ function isu.component(renderer)
         context.events = accumulator()
         context.transitions = accumulator()
         context.subcomponents = accumulator()
+        context.subscriptions = accumulator()
 
         context.render = function()
             return coroutine.wrap(function()
@@ -376,6 +490,7 @@ function isu.component(renderer)
                     context.events:reset()
                     context.transitions:reset()
                     context.subcomponents:reset()
+                    context.subscriptions:reset()
 
                     local className, nprops = renderer(context.props)
                     if getType(className) ~= 'string' or getType(nprops) ~= 'table' then
@@ -383,10 +498,15 @@ function isu.component(renderer)
                     end
 
                     local inst = makeInstance(className, nprops)
+                    mutateConditionally(inst, nprops)
                     if not context.prev.v then
                         context.prev.v = inst
-                    else
-                        mutateConditionally(context.prev.v, nprops)
+                        for _, effect in pairs(context.effects.stack) do
+                            local unmounter = effect.fn()
+                            if unmounter and not context.unmounts:next() then
+                                context.unmounts:push(unmounter)
+                            end
+                        end
                     end
 
                     return inst
