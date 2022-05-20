@@ -1,5 +1,6 @@
 ---
 title: Home
+nav_order: 1
 ---
 
 `isu` is a minimal, lightweight library for building reactive user interfaces in the Roblox engine. [Inspired by React's functional components and hook system](https://reactjs.org/docs/hooks-intro.html), it allows for the composition of components through pure functions and avoids most of the overhead and redundancy introduced by class-based components or object-based data structures. Part of the `isu` philosophy is to use functions wherever possible to create, access, and store reactive data, and to abstract away the process of Instance creation through the library's automatism.
