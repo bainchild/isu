@@ -513,11 +513,11 @@ end
 -- Creates a component builder, which can be called to create new components
 -- with a renderer and hooks. The library uses the builder to construct the
 -- Instance component factory at `isu.component`.
----@param instanciator function @This function must accept a class name and a dictionary of properties at minimum. The table can also include an array part composed of subcomponents, but this behavior may be safely ignored if not relevant.
+---@param instantiator function @This function must accept a class name and a dictionary of properties at minimum. The table can also include an array part composed of subcomponents, but this behavior may be safely ignored if not relevant.
 ---@param mutator function @This function is used to mutate an existing object. It must accept the instance to mutate and a dictionary of properties to assign. A common optimization is to only assign a property if its value has changed.
 ---@param opts? table @You can enable special hooks (such as `useEvent` and `useAnimation`) by setting them to true in this table (`["useEvent"] = true`). Essential hooks such as `useState` and `useEffect` are always available.
 ---@return function
-function isu.builder(instanciator, mutator, opts)
+function isu.builder(instantiator, mutator, opts)
     opts = opts or {}
     -- returns a factory which can be made
     -- to build a component from props
@@ -570,7 +570,7 @@ function isu.builder(instanciator, mutator, opts)
                             end
                         end
 
-                        local inst = instanciator(className, nprops)
+                        local inst = instantiator(className, nprops)
                         mutator(inst, nprops)
                         if not context.prev.v then
                             context.prev.v = inst
