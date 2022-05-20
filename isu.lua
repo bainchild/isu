@@ -151,12 +151,12 @@ end
 local makeInstance
 do --> context-aware instance creation
     local function make(className, properties)
-        local inst = instanceNew(className)
+        local inst = getType(className) == 'Instance' and className or instanceNew(className)
         for key, delta in pairs(properties) do
             if getType(key) == 'number' then
                 delta().Parent = inst
             else
-                if getType(delta) == 'table' 
+                if getType(delta) == 'table'
                     and getmt(delta)
                     and getmt(delta).__type == 'Subscription' then
                         inst[key] = delta.value
@@ -521,8 +521,12 @@ function isu.builder(instantiator, mutator, opts)
     opts = opts or {}
     -- returns a factory which can be made
     -- to build a component from props
-    return function(renderer)
+    return function(renderer, hydrateThis)
         return function(props)
+            if not opts.hydration and hydrateThis then
+                return error('Hydration not enabled in builder options.')
+            end
+
             local context = {
                 opts = opts,
                 prev = weakRef(nil),
@@ -570,9 +574,9 @@ function isu.builder(instantiator, mutator, opts)
                             end
                         end
 
-                        local inst = instantiator(className, nprops)
+                        local inst = instantiator(hydrateThis or className, nprops)
                         mutator(inst, nprops)
-                        if not context.prev.v then
+                        if not context.prev.v or (not context.prev.v and hydrateThis) then
                             context.prev.v = inst
                             for _, effect in pairs(context.effects.stack) do
                                 local unmounter = effect.fn()
@@ -622,6 +626,25 @@ local INSTANCE_BUILDER = isu.builder(makeInstance, mutateConditionally, {
 ---@return fun(props:Props):fun():Instance
 function isu.component(renderer)
     return INSTANCE_BUILDER(renderer)
+end
+
+local INSTANCE_HYDRATE = isu.builder(makeInstance, mutateConditionally, {
+    hydration = true, -- enable hydration for this builder
+    enableAll = true -- enable all hooks on instances
+})
+-- Hydrates (updates) an already existing object with the renderer instead of
+-- creating one. Initial properties can also be provided. Otherwise, behavior
+-- is the exact same as the component factory, but returns nothing.
+--
+-- **Hydration does not automatically hydrate any subcomponents.**
+-- You will have to hydrate any children manually and remove their factory
+-- in the renderer's returned properties, or leave their creation up to the
+-- renderer.
+---@param object Instance
+---@param renderer function
+---@param props? table
+function isu.hydrate(object, renderer, props)
+    INSTANCE_HYDRATE(renderer, object)(props)()
 end
 
 return isu
