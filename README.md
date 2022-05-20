@@ -40,8 +40,9 @@ You can read the in-depth introduction, further examples and the API reference [
 - [x] Essential hooks such as `useState`, `useEffect` and mounting/unmounting behavior.
 - [x] Event composition through `useEvent` to avoid leaking an object reference to the renderer.
 - [x] Animation composition through `useTransition` to simplify tweening and avoid a [notorious Roact problem.](https://devforum.roblox.com/t/tweening-with-roact/83081/2)
-- [ ] Sequential animations by returning a list of transitions in `useTransition` and triggerable animations through `useAnimation`.
-- [ ] Subscription hooks such as `useSubscription` to create stateful derivable values that does not need the renderer to have an effect, such as when the value is used exclusively as an Instance property.
+- [x] Triggerable animations through `useAnimation`.
+- [x] Subscription hooks such as `useSubscription` to create stateful derivable values that does not need the renderer to have an effect, such as when the value is used exclusively as an Instance property.
+- [ ] Sequential animations by returning a list of transitions in `useTransition`.
 - [ ] Proper documentation hosted on Github Pages
 
 ## History
