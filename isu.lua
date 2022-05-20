@@ -87,6 +87,8 @@ end
 ---@field unmounts Accumulator Holds unmounting callbacks.
 ---@field events Accumulator Event callbacks to be connected to rendered objects.
 ---@field transitions Accumulator Tween generator for mutated properties.
+---@field animations Accumulator Tween generator for user-mutated properties.
+---@field animated table Dictionary mapping property names to a boolean representing whether they were user-animated for this render.
 ---@field subcomponents Accumulator Nested components created at render time.
 
 -- Sets the coroutine's current context to def.
@@ -217,6 +219,12 @@ local function mutateConditionally(src, new)
             elseif t1 ~= t2 then
                 -- mutate due to differing types
                 src[key] = delta
+            elseif ctx.animated[key] then
+                for _, v in pairs(ctx.animations.stack) do
+                    if v.name == key then
+                        performTransition(src, key, ctx.animated[key], v)
+                    end
+                end
             elseif src[key] ~= delta then
                 -- mutate on differing values
                 local hast = {}
@@ -342,6 +350,56 @@ function isu.useTransition(propertyName, tweenCalculator)
     end
 end
 
+-- Returns a function that animates a property upon invocation. `useAnimation`
+-- accepts the same arguments as `useTransition` and their behavior is the same,
+-- but while `useTransition` applies an animation _when_ a property is mutated,
+-- `useAnimation` only applies an animation when the user requests it through
+-- the returned callback, passing the new value to animate to as an argument.
+--
+-- **Take note that the callback does not immediately trigger the animation.**
+-- Instead, it schedules it to be performed on the next re-render, similarly to
+-- `useTransition`'s mechanism. In most cases, the animation should be performed
+-- straight away as hook usage often triggers a re-render, but in the case that
+-- it doesn't, you can manually force a re-render through `useTriggerableRender`
+-- after scheduling your animation(s).
+--
+-- **Example:**
+-- ```
+-- local rerender = useTriggerableRender()
+-- local anim = useAnimation('Position', function(newValue, onTransitionEnd)
+--     onTransitionEnd(function()
+--         print('Transition has ended.')
+--     end)
+--     return 0.3, Enum.EasingStyle.Quad
+-- end)
+-- useEvent('MouseButton1Click', function()
+--     anim(UDim2.new(0, 100 * math.random(), 0, 100 * math.random()))
+--     rerender()
+-- end)
+-- ```
+---@generic T
+---@param propertyName string
+---@param tweenCalculator fun(newValue:any,onTransitionEnd:fun(callback:function))
+---@return fun(newValue:T)
+function isu.useAnimation(propertyName, tweenCalculator)
+    local ctx = getContext()
+    local current = ctx.animations:next()
+    if not current then
+        local anim
+        anim = {
+            name = propertyName,
+            fn = tweenCalculator,
+            perform = function(newValue)
+                ctx.animated[propertyName] = newValue
+            end
+        }
+        ctx.animations:push(anim)
+        return anim.perform
+    else
+        return current.perform
+    end
+end
+
 local SUBSCRIPTION_MT = {
     __type = 'Subscription',
     __call = function(t, optional)
@@ -413,6 +471,14 @@ function isu.useSubscription(value)
     end
 end
 
+-- Returns a callback that re-renders the component when invoked.
+-- Avoids React's [forced re-render problem](https://stackoverflow.com/questions/46240647/react-how-to-force-a-function-component-to-render/53837442)
+-- in functional components.
+---@return function
+function isu.useTriggerableRender()
+    return getContext().render
+end
+
 -- Creates a new component and returns its factory, a function used to construct
 -- component instances. Calling the factory instanciates a component with an initial
 -- dictionary of user-defined props passed as a parameter, and returns a function that can
@@ -461,6 +527,8 @@ function isu.component(renderer)
         context.unmounts = accumulator()
         context.events = accumulator()
         context.transitions = accumulator()
+        context.animations = accumulator()
+        context.animated = {}
         context.subcomponents = accumulator()
         context.subscriptions = accumulator()
 
@@ -473,6 +541,7 @@ function isu.component(renderer)
                     context.unmounts:reset()
                     context.events:reset()
                     context.transitions:reset()
+                    context.animations:reset()
                     context.subcomponents:reset()
                     context.subscriptions:reset()
 
@@ -493,6 +562,7 @@ function isu.component(renderer)
                         end
                     end
 
+                    context.animated = {}
                     return inst
                 end)
             end)()
