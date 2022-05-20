@@ -26,6 +26,7 @@ local WEAK_MT_KV = {__mode = 'kv'}
 local function weakRef(value)
     return setmt({v = value}, WEAK_MT_V)
 end
+setmt(_contextStorage, WEAK_MT_K)
 
 -- Clones a table. If `deep` is truthy, all nested tables will be cloned too.
 ---@param t table
@@ -52,6 +53,10 @@ end
 local function accumulator()
     local obj = {stack={}, coro=setmt({},WEAK_MT_KV)}
 
+    function obj:index()
+        return self.coro[coroRunning()]
+    end
+
     function obj:at(i)
         return self.stack[i]
     end
@@ -75,9 +80,22 @@ local function accumulator()
         return self:at(self.coro[running]), self.coro[running]
     end
 
+    function obj:denote()
+        if self.denotei then
+            if self.denotei ~= #self.stack then
+                return error('Variadic accumulation has been detected during composition. Make sure that you are not conditionally invoking hooks (for instance, within an if statement).', 2)
+            end
+        end
+        self.denotei = #self.stack
+    end
+
     return obj
 end
 
+local CONTEXT_ACCUMULATORS = {
+    'objects', 'states', 'effects', 'unmounts', 'events',
+    'transitions', 'animations', 'subcomponents', 'subscriptions'
+}
 ---@class Context
 ---@field prev WeakTable|nil Weak reference to the currently rendered object.
 ---@field props table Properties of the component. Can be mutated on renders.
@@ -90,6 +108,7 @@ end
 ---@field animations Accumulator Tween generator for user-mutated properties.
 ---@field animated table Dictionary mapping property names to a boolean representing whether they were user-animated for this render.
 ---@field subcomponents Accumulator Nested components created at render time.
+---@field subscriptions Accumulator Subscription-based stateful variables.
 
 -- Sets the coroutine's current context to def.
 ---@param def any Default value to set context to.
@@ -119,6 +138,14 @@ local function withContext(ctx, fn, ...)
     local result = fn(...)
     setContext(previous)
     return result
+end
+
+-- Verifies if a hook is enabled in this component.
+local function assertUsability(hookName)
+    return (
+        getContext().opts[hookName] or
+        getContext().opts['enableAll']
+    ) or error('"' .. hookName .. '" is not enabled in this component builder.')
 end
 
 local makeInstance
@@ -314,6 +341,7 @@ end
 ---@param eventName string
 ---@param connection function
 function isu.useEvent(eventName, connection)
+    assertUsability('useEvent')
     local ctx = getContext()
     local current = ctx.events:next()
     if not current then
@@ -343,6 +371,7 @@ end
 ---@param propertyName string
 ---@param tweenCalculator fun(newValue:any,onTransitionEnd:fun(callback:function))
 function isu.useTransition(propertyName, tweenCalculator)
+    assertUsability('useTransition')
     local ctx = getContext()
     local current = ctx.transitions:next()
     if not current then
@@ -382,6 +411,7 @@ end
 ---@param tweenCalculator fun(newValue:any,onTransitionEnd:fun(callback:function))
 ---@return fun(newValue:T)
 function isu.useAnimation(propertyName, tweenCalculator)
+    assertUsability('useAnimation')
     local ctx = getContext()
     local current = ctx.animations:next()
     if not current then
@@ -445,6 +475,7 @@ local SUBSCRIPTION_MT = {
 ---@param value any
 ---@return fun(newValue?:T) @Updater-retriever. Calling it without an argument retrieves the value, and calling it with an argument updates the value.
 function isu.useSubscription(value)
+    assertUsability('useSubscription')
     local ctx = getContext()
     local current, i = ctx.subscriptions:next()
     if current then
@@ -479,6 +510,94 @@ function isu.useTriggerableRender()
     return getContext().render
 end
 
+-- Creates a component builder, which can be called to create new components
+-- with a renderer and hooks. The library uses the builder to construct the
+-- Instance component factory at `isu.component`.
+---@param instanciator function @This function must accept a class name and a dictionary of properties at minimum. The table can also include an array part composed of subcomponents, but this behavior may be safely ignored if not relevant.
+---@param mutator function @This function is used to mutate an existing object. It must accept the instance to mutate and a dictionary of properties to assign. A common optimization is to only assign a property if its value has changed.
+---@param opts? table @You can enable special hooks (such as `useEvent` and `useAnimation`) by setting them to true in this table (`["useEvent"] = true`). Essential hooks such as `useState` and `useEffect` are always available.
+---@return function
+function isu.builder(instanciator, mutator, opts)
+    opts = opts or {}
+    -- returns a factory which can be made
+    -- to build a component from props
+    return function(renderer)
+        return function(props)
+            local context = {
+                opts = opts,
+                prev = weakRef(nil),
+                props = props,
+                animated = {}
+            }
+
+            if getContext() then
+                -- constructed within other component
+                local cctx = getContext()
+                local current = cctx.subcomponents:next()
+                if current then
+                    current.props = props
+                    return current.render
+                else
+                    cctx.subcomponents:push(context)
+                end
+            end
+
+            for _, v in pairs(CONTEXT_ACCUMULATORS) do
+                context[v] = accumulator()
+            end
+
+            context.render = coroutine.wrap(function()
+                while true do
+                    coroutine.yield(withContext(context, function()
+                        for _, v in pairs(CONTEXT_ACCUMULATORS) do
+                            context[v]:reset()
+                        end
+
+                        local className, nprops = renderer(context.props)
+                        if getType(className) ~= 'string' or getType(nprops) ~= 'table' then
+                            error('Component renderer must return a classname and properties.')
+                        end
+
+                        -- Can detect varadic (conditional) hook use.
+                        -- Error if the current hook counts aren't similar
+                        -- to the previous hook counts.
+                        -- An exception is made for the objects accumulator,
+                        -- whose value is mediated by the mutator and not
+                        -- by the renderer.
+                        for _, v in pairs(CONTEXT_ACCUMULATORS) do
+                            if v ~= 'objects' then
+                                context[v]:denote()
+                            end
+                        end
+
+                        local inst = instanciator(className, nprops)
+                        mutator(inst, nprops)
+                        if not context.prev.v then
+                            context.prev.v = inst
+                            for _, effect in pairs(context.effects.stack) do
+                                local unmounter = effect.fn()
+                                if unmounter and not context.unmounts:next() then
+                                    context.unmounts:push(unmounter)
+                                end
+                            end
+                        end
+
+                        if opts.useAnimation then
+                            context.animated = {}
+                        end
+                        return inst
+                    end))
+                end
+            end)
+
+            return context.render
+        end
+    end
+end
+
+local INSTANCE_BUILDER = isu.builder(makeInstance, mutateConditionally, {
+    enableAll = true -- enable all hooks on instances
+})
 -- Creates a new component and returns its factory, a function used to construct
 -- component instances. Calling the factory instanciates a component with an initial
 -- dictionary of user-defined props passed as a parameter, and returns a function that can
@@ -502,74 +621,7 @@ end
 ---@param renderer fun(props:Props):string,table
 ---@return fun(props:Props):fun():Instance
 function isu.component(renderer)
-    -- returns a factory which can be made
-    -- to build a component from props
-    return function(props)
-        local context = {}
-
-        if getContext() then
-            -- constructed within other component
-            local cctx = getContext()
-            local current = cctx.subcomponents:next()
-            if current then
-                current.props = props
-                return current.render
-            else
-                cctx.subcomponents:push(context)
-            end
-        end
-
-        context.prev = weakRef(nil)
-        context.props = props
-        context.objects = accumulator()
-        context.states = accumulator()
-        context.effects = accumulator()
-        context.unmounts = accumulator()
-        context.events = accumulator()
-        context.transitions = accumulator()
-        context.animations = accumulator()
-        context.animated = {}
-        context.subcomponents = accumulator()
-        context.subscriptions = accumulator()
-
-        context.render = coroutine.wrap(function()
-            while true do
-                coroutine.yield(withContext(context, function()
-                    context.objects:reset()
-                    context.states:reset()
-                    context.effects:reset()
-                    context.unmounts:reset()
-                    context.events:reset()
-                    context.transitions:reset()
-                    context.animations:reset()
-                    context.subcomponents:reset()
-                    context.subscriptions:reset()
-
-                    local className, nprops = renderer(context.props)
-                    if getType(className) ~= 'string' or getType(nprops) ~= 'table' then
-                        error('Component renderer must return a classname and properties.')
-                    end
-
-                    local inst = makeInstance(className, nprops)
-                    mutateConditionally(inst, nprops)
-                    if not context.prev.v then
-                        context.prev.v = inst
-                        for _, effect in pairs(context.effects.stack) do
-                            local unmounter = effect.fn()
-                            if unmounter and not context.unmounts:next() then
-                                context.unmounts:push(unmounter)
-                            end
-                        end
-                    end
-
-                    context.animated = {}
-                    return inst
-                end))
-            end
-        end)
-
-        return context.render
-    end
+    return INSTANCE_BUILDER(renderer)
 end
 
 return isu
