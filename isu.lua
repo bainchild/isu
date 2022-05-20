@@ -130,7 +130,7 @@ do --> context-aware instance creation
                 if getType(delta) == 'table' 
                     and getmt(delta)
                     and getmt(delta).__type == 'Subscription' then
-                        inst[key] = delta.represents.value
+                        inst[key] = delta.value
                 else
                     inst[key] = delta
                 end
@@ -192,7 +192,6 @@ local function performTransition(instance, property, toValue, transition)
     return true
 end
 
-local subscriptionComputeDerivative
 -- Mutates an instance conditionally, only overwriting fields when they have changed,
 ---@param src Instance
 ---@param new table
@@ -207,10 +206,10 @@ local function mutateConditionally(src, new)
                 local mt = getmt(delta)
                 if mt and mt.__type then
                     if mt.__type == 'Subscription' then
-                        delta.represents.listeners[key] = function()
-                            src[key] = subscriptionComputeDerivative(delta)
+                        delta.represents.listeners[key] = function(newValue)
+                            src[key] = newValue
                         end
-                        src[key] = subscriptionComputeDerivative(delta)
+                        src[key] = delta.value
                     end
                 else
                     src[key] = delta
@@ -235,65 +234,6 @@ local function mutateConditionally(src, new)
         end
     end
     return src
-end
-
-local subscriptionDerivative
-local SUBSCRIPTION_MT_OP = function (op)
-    return function(derivative, arg)
-        return subscriptionDerivative(derivative, op, arg)
-    end
-end
-local SUBSCRIPTION_MT = {
-    __type = 'Subscription',
-    __add = SUBSCRIPTION_MT_OP('add'),
-    __sub = SUBSCRIPTION_MT_OP('sub'),
-    __mul = SUBSCRIPTION_MT_OP('mul'),
-    __div = SUBSCRIPTION_MT_OP('div'),
-    __pow = SUBSCRIPTION_MT_OP('pow'),
-}
-
-function subscriptionDerivative(src, op, arg)
-    if src.op then
-        local derivative = setmt({
-            root = src.root,
-            op = op,
-            arg = arg
-        }, SUBSCRIPTION_MT)
-        src.next = derivative
-        return derivative
-    else
-        return setmt({
-            root = src,
-            op = op,
-            arg = arg
-        }, SUBSCRIPTION_MT)
-    end
-end
-
-function subscriptionComputeDerivative(src)
-    if src.value then
-        return src.value
-    end
-    local step = src.root
-    local value = step.value
-    while step.next do
-        step = step.next
-        local op = step.op
-        if op == 'add' then
-            value = value + step.arg
-        elseif op == 'sub' then
-            value = value - step.arg
-        elseif op == 'mul' then
-            value = value * step.arg
-        elseif op == 'div' then
-            value = value / step.arg
-        elseif op == 'pow' then
-            value = value ^ step.arg
-        else
-            error('Unsupported operation on derivative.')
-        end
-    end
-    return value
 end
 
 -----------------------------------------------
@@ -402,6 +342,50 @@ function isu.useTransition(propertyName, tweenCalculator)
     end
 end
 
+local SUBSCRIPTION_MT = {
+    __type = 'Subscription',
+    __call = function(t, optional)
+        if not optional then
+            return t.value
+        else
+            t.represents.updater(optional)
+            return optional
+        end
+    end
+}
+-- Creates a subscription-based stateful value. This hook serves as a more performant
+-- alternative to `useState` when the value only needs to be accessed and updated within another
+-- hook (such as `useEvent` or `useEffect`) and not within the renderer function directly.
+-- When a subscription's value updates, the value is directly applied to the Instance instead
+-- of passing through the library's reconciliation and diffing process, which invokes the renderer.
+-- The usual use of a subscription is when a value is used exclusively within an Instance's properties.
+--
+-- **Subscriptions should not be used if your code repeatedly needs to read its value.** Occasional
+-- access through hooks is fine, but `useState` is the superior option to use if your renderer
+-- needs to access the value regularly, since the subscription's method of reading is less performant.
+-- 
+-- `useSubscription` returns a single function which, when called with no arguments, returns the
+-- current value. However, when it is called with a single argument, the value of the subscription
+-- is updated to the value passed through the argument and the Instance is updated accordingly. Only
+-- this function is necessary, but for compatibility with the `useState` syntax, a second function will
+-- also be returned that exclusively updates the value of the subscription.
+--
+-- **Example:**
+-- ```
+-- local time = useSubscription(workspace.DistributedGameTime)
+-- print("This should only be printed once, unlike the useState hook!")
+-- useEffect(function()
+--		task.spawn(function()
+--			while task.wait() do
+--				time(workspace.DistributedGameTime)
+--			end
+--		end)
+--	end)
+-- return 'TextButton', { Size = UDim2.new(0, 200, 0, 200), Text = time }
+-- ```
+---@generic T
+---@param value any
+---@return fun(newValue?:T) @Updater-retriever. Calling it without an argument retrieves the value, and calling it with an argument updates the value.
 function isu.useSubscription(value)
     local ctx = getContext()
     local current, i = ctx.subscriptions:next()
@@ -425,7 +409,7 @@ function isu.useSubscription(value)
             end
         end
         ctx.subscriptions:push(subscription)
-        return subscription.proxy, subscription.updater
+        return subscription.proxy, current.updater
     end
 end
 
