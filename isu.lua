@@ -2,13 +2,17 @@
 -- isu: a minimal, lightweight library for building reactive user interfaces in the Roblox engine.
 -- https://github.com/ccreaper/isu
 
+-- Generic
+local assert = assert
 local getType = typeof or type
 local coroRunning = coroutine.running
-local instanceNew = Instance.new
 local pairs = pairs
 local getmt = getmetatable
 local setmt = setmetatable
-local tweenService = game:GetService("TweenService")
+
+-- Roblox specific
+local instanceNew = Instance and Instance.new
+local tweenService = game and game:GetService("TweenService")
 
 local isu = {}
 local _contextStorage = {}
@@ -174,6 +178,7 @@ do --> context-aware instance creation
     ---@param properties table
     ---@return Instance
     function makeInstance(className, properties)
+        assert(instanceNew, 'Instance creation is not supported.')
         local ctx = getContext()
         local current = ctx.objects:next()
         if not current then
@@ -204,6 +209,8 @@ end
 ---@param transition Transition
 ---@return boolean
 local function performTransition(instance, property, toValue, transition)
+    assert(tweenService, 'Tweening is not supported.')
+
     local onEnd
     local function useTransitionComplete(endFn)
         onEnd = endFn
