@@ -532,9 +532,9 @@ function isu.component(renderer)
         context.subcomponents = accumulator()
         context.subscriptions = accumulator()
 
-        context.render = function()
-            return coroutine.wrap(function()
-                return withContext(context, function()
+        context.render = coroutine.wrap(function()
+            while true do
+                coroutine.yield(withContext(context, function()
                     context.objects:reset()
                     context.states:reset()
                     context.effects:reset()
@@ -564,9 +564,9 @@ function isu.component(renderer)
 
                     context.animated = {}
                     return inst
-                end)
-            end)()
-        end
+                end))
+            end
+        end)
 
         return context.render
     end
