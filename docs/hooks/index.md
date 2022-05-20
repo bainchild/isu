@@ -14,7 +14,7 @@ For instance, the following example is _invalid_:
 ```lua
 local x, setX = useState(0) -- used outside of a component, therefore errors
 local counter = component(function()
-    return 'TextLabel', { Text: x }
+    return 'TextLabel', { Text = x }
 end)
 ```
 
@@ -22,7 +22,7 @@ The following example is _valid_:
 ```lua
 local counter = component(function()
     local x, setX = useState(0) -- used within a component, therefore works
-    return 'TextLabel', { Text: x }
+    return 'TextLabel', { Text = x }
 end)
 ```
 
@@ -35,7 +35,7 @@ local function customHook()
 end
 
 local counter = component(function()
-    return 'TextLabel', { Text: customHook() }
+    return 'TextLabel', { Text = customHook() }
 end)
 ```
 
@@ -50,7 +50,7 @@ component(function()
             setTime(tick())
         end
     end)
-    return 'TextLabel', { Text: time }
+    return 'TextLabel', { Text = time }
 end)
 ```
 The consequences of running the above code for some time results in the whooping consumption of over _21 GB_ of memory. Obviously, this is a problem, and it's caused by inadvertently causing a memory leak by spawning a new task _every time_ the component re-renders.
@@ -69,7 +69,7 @@ component(function()
             end
         end)
     end)
-    return 'TextLabel', { Text: time }
+    return 'TextLabel', { Text = time }
 end)
 ```
 
