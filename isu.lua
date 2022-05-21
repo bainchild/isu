@@ -6,16 +6,18 @@
 local assert = assert
 local getType = typeof or type
 local coroRunning = coroutine.running
-local pairs = pairs
+local unpack = table.unpack or unpack
+local next = next
 local getmt = getmetatable
 local setmt = setmetatable
 
 -- Roblox specific
 local instanceNew = Instance and Instance.new
 local tweenService = game and game:GetService("TweenService")
+local connect = game.Destroying.Connect
+local disconnect = connect(game.Destroying,function()end).Disconnect
 
 local isu = {}
-local _contextStorage = {}
 
 ---@class WeakTable
 ---@field v any
@@ -23,6 +25,7 @@ local _contextStorage = {}
 local WEAK_MT_K = {__mode = 'k'}
 local WEAK_MT_V = {__mode = 'v'}
 local WEAK_MT_KV = {__mode = 'kv'}
+local _contextStorage = setmt({}, WEAK_MT_K)
 -- Creates a weak reference holder (weak table) and returns it.
 -- Data is pointed to by `self.v`, but can be stored anywhere in the table.
 ---@param value any
@@ -30,7 +33,6 @@ local WEAK_MT_KV = {__mode = 'kv'}
 local function weakRef(value)
     return setmt({v = value}, WEAK_MT_V)
 end
-setmt(_contextStorage, WEAK_MT_K)
 
 -- Clones a table. If `deep` is truthy, all nested tables will be cloned too.
 ---@param t table
@@ -38,7 +40,7 @@ setmt(_contextStorage, WEAK_MT_K)
 ---@return table
 local function clone(t, deep)
     local nt = {}
-    for key, delta in pairs(t) do
+    for key, delta in next, t do
         local nK, nD = key, delta
         if getType(key) == 'table' and deep then
             nK = clone(key, deep)
@@ -52,103 +54,92 @@ local function clone(t, deep)
 end
 
 ---@class Accumulator
----@field stack table
+---@field stk table
 ---@return Accumulator
 local function accumulator()
-    local obj = {stack={}, coro=setmt({},WEAK_MT_KV)}
-
-    function obj:index()
-        return self.coro[coroRunning()]
-    end
-
-    function obj:at(i)
-        return self.stack[i]
-    end
-
-    function obj:write(i, value)
-        self.stack[i] = value
-    end
-
-    function obj:push(value)
-        self.stack[#self.stack+1] = value
-        return value
-    end
-
-    function obj:reset()
-        self.coro[coroRunning()] = 0
-    end
-
-    function obj:next()
-        local running = coroRunning()
-        self.coro[running] = self.coro[running] + 1
-        return self:at(self.coro[running]), self.coro[running]
-    end
-
-    function obj:denote()
-        if self.denotei then
-            if self.denotei ~= #self.stack then
-                return error('Variadic accumulation has been detected during composition. Make sure that you are not conditionally invoking hooks (for instance, within an if statement).', 2)
+    return {
+        stk = {},
+        coro = setmt({}, WEAK_MT_KV),
+        rst = function(a)
+            a.coro[coroRunning()] = 0
+        end,
+        inc = function(a)
+            local running = coroRunning()
+            a.coro[running] = a.coro[running] + 1
+            return a:at(a.coro[running]), a.coro[running]
+        end,
+        frz = function(a)
+            if a.fi then
+                if a.fi ~= #a.stk then
+                    return error('Variadic accumulation has been detected during composition. Make sure that you are not conditionally invoking hooks (for instance, within an if statement).', 2)
+                end
             end
-        end
-        self.denotei = #self.stack
-    end
-
-    return obj
+            a.fi = #a.stk
+        end,
+        at = function(a, i)
+            return a.stk[i]
+        end,
+        set = function(a, i, v)
+            a.stk[i] = v
+        end,
+        add = function(a, v)
+            a.stk[#a.stk+1] = v
+            return v
+        end,
+    }
 end
 
 local CONTEXT_ACCUMULATORS = {
-    'objects', 'states', 'effects', 'unmounts', 'events',
-    'transitions', 'animations', 'subcomponents', 'subscriptions'
+    'obj', 'st', 'efc', 'unm', 'evt',
+    'trs', 'anm', 'sbc', 'sub'
 }
 ---@class Context
 ---@field prev WeakTable|nil Weak reference to the currently rendered object.
 ---@field props table Properties of the component. Can be mutated on renders.
----@field objects Accumulator Stores and caches created instances.
----@field states Accumulator Variables declared in the renderer.
----@field effects Accumulator Holds mounting callbacks.
----@field unmounts Accumulator Holds unmounting callbacks.
----@field events Accumulator Event callbacks to be connected to rendered objects.
----@field transitions Accumulator Tween generator for mutated properties.
----@field animations Accumulator Tween generator for user-mutated properties.
----@field animated table Dictionary mapping property names to a boolean representing whether they were user-animated for this render.
----@field subcomponents Accumulator Nested components created at render time.
----@field subscriptions Accumulator Subscription-based stateful variables.
+---@field obj Accumulator Stores and caches created instances.
+---@field st Accumulator Variables declared in the renderer.
+---@field efc Accumulator Holds mounting callbacks.
+---@field unm Accumulator Holds unmounting callbacks.
+---@field evt Accumulator Event callbacks to be connected to rendered objects.
+---@field trs Accumulator Tween generator for mutated properties.
+---@field anm Accumulator Tween generator for user-mutated properties.
+---@field ani table Dictionary mapping property names to a boolean representing whether they were user-animated for this render.
+---@field sbc Accumulator Nested components created at render time.
+---@field sub Accumulator Subscription-based stateful variables.
 
 -- Sets the coroutine's current context to def.
 ---@param def any Default value to set context to.
----@param coro? any Apply context to this coroutine. Defaults to current thread.
 ---@return Context
-local function setContext(def, coro)
-    coro = coro or coroRunning()
+local function cset(def)
+    local coro = coroRunning()
     _contextStorage[coro] = def
     return _contextStorage[coro]
 end
 
 -- Retrieves the context from the coroutine. Can be nil.
----@param coro? any Apply context to this coroutine. Defaults to current thread.
 ---@return Context|nil
-local function getContext(coro)
-    coro = coro or coroRunning()
-    return _contextStorage[coro]
+local function cget()
+    return _contextStorage[coroRunning()]
 end
 
 -- Calls `fn` with the supplied context `ctx`. Varargs are passed to `fn`.
 ---@param ctx Context
 ---@param fn function
 ---@vararg any
-local function withContext(ctx, fn, ...)
-    local previous = getContext()
-    setContext(ctx)
-    local result = fn(...)
-    setContext(previous)
-    return result
+local function cuse(ctx, fn, preserverts)
+    local previous = cget()
+    cset(ctx)
+    local result = {fn()}
+    cset(previous)
+    return preserverts and unpack(result)
 end
 
 -- Verifies if a hook is enabled in this component.
 local function assertUsability(hookName)
+    local c = cget()
     return (
-        getContext().opts[hookName] or
-        getContext().opts['enableAll']
+        c.opts[hookName] or
+        c.opts['enableAll']
     ) or error('"' .. hookName .. '" is not enabled in this component builder.')
 end
 
@@ -156,14 +147,13 @@ local makeInstance
 do --> context-aware instance creation
     local function make(className, properties)
         local inst = getType(className) == 'Instance' and className or instanceNew(className)
-        for key, delta in pairs(properties) do
+        for key, delta in next, properties do
             if getType(key) == 'number' then
                 delta().Parent = inst
             else
-                if getType(delta) == 'table'
-                    and getmt(delta)
-                    and getmt(delta).__type == 'Subscription' then
-                        inst[key] = delta.value
+                local t = getType(delta) == 'table' and getmt(delta)
+                if t and t.tt == 'Subscription' then
+                    inst[key] = delta.value
                 else
                     inst[key] = delta
                 end
@@ -179,20 +169,20 @@ do --> context-aware instance creation
     ---@return Instance
     function makeInstance(className, properties)
         assert(instanceNew, 'Instance creation is not supported.')
-        local ctx = getContext()
-        local current = ctx.objects:next()
+        local ctx = cget()
+        local current = ctx.obj:inc()
         if not current then
             properties = properties or {}
             current = make(className, properties)
-            ctx.objects:push(current)
-            current.Destroying:Connect(function()
-                for _, unmounter in pairs(ctx.unmounts.stack) do
+            ctx.obj:add(current)
+            connect(current.Destroying, function()
+                for _, unmounter in next, ctx.unm.stk do
                     unmounter()
                 end
             end)
         end
-        for _, event in pairs(ctx.events.stack) do
-            event.connection = current[event.name]:Connect(event.fn)
+        for _, event in next, ctx.evt.stk do
+            event.connection = connect(current[event.name], event.fn)
         end
         return current
     end
@@ -222,7 +212,7 @@ local function performTransition(instance, property, toValue, transition)
     })
 
     if onEnd then
-        tween.Completed:Connect(onEnd)
+        connect(tween.Completed, onEnd)
     end
     tween:Play()
     return true
@@ -233,15 +223,15 @@ end
 ---@param new table
 ---@return Instance
 local function mutateConditionally(src, new)
-    local ctx = getContext()
-    for key, delta in pairs(new) do
+    for key, delta in next, new do
         if getType(key) ~= 'number' then
+            local ctx = cget()
             local t1, t2 = getType(src[key]), getType(delta)
             if t2 == 'table' then
                 -- check if special object
                 local mt = getmt(delta)
-                if mt and mt.__type then
-                    if mt.__type == 'Subscription' then
+                if mt and mt.tt then
+                    if mt.tt == 'Subscription' then
                         delta.represents.listeners[key] = function(newValue)
                             src[key] = newValue
                         end
@@ -253,16 +243,16 @@ local function mutateConditionally(src, new)
             elseif t1 ~= t2 then
                 -- mutate due to differing types
                 src[key] = delta
-            elseif ctx.animated[key] then
-                for _, v in pairs(ctx.animations.stack) do
+            elseif ctx.ani[key] then
+                for _, v in next, ctx.anm.stk do
                     if v.name == key then
-                        performTransition(src, key, ctx.animated[key], v)
+                        performTransition(src, key, ctx.ani[key], v)
                     end
                 end
             elseif src[key] ~= delta then
                 -- mutate on differing values
                 local hast = {}
-                for _, v in pairs(ctx.transitions.stack) do
+                for _, v in next, ctx.trs.stk do
                     if v.name == key then
                         hast[key] = performTransition(src, key, delta, v)
                     end
@@ -289,16 +279,16 @@ end
 ---@return T Value @The current value. Will update automatically after the updater has been called.
 ---@return fun(newValue:T) Updater @The stateful updater. Call this to update the state with a new value.
 function isu.useState(value)
-    local ctx = getContext()
-    local current, i = ctx.states:next()
+    local ctx = cget()
+    local current, i = ctx.st:inc()
     if current then
         return current.value, current.updater
     else
         local state
-        state = ctx.states:push({
+        state = ctx.st:add({
             value = value,
             updater = function(newValue)
-                if ctx.states:at(i).value ~= newValue then
+                if ctx.st:at(i).value ~= newValue then
                     state.value = newValue
                     ctx.render()
                 end
@@ -317,13 +307,13 @@ end
 ---@param fn function
 ---@param states? any[]
 function isu.useEffect(fn, states)
-    local ctx = getContext()
-    local current = ctx.effects:next()
+    local ctx = cget()
+    local current = ctx.efc:inc()
     if not current then
-        ctx.effects:push({fn=fn,states=states or {}})
+        ctx.efc:add({fn=fn,states=states or {}})
     elseif states then
         for i = 1, #states do
-            if current.states[i] ~= states[i] then
+            if current.st[i] ~= states[i] then
                 current.fn()
                 break
             end
@@ -349,14 +339,14 @@ end
 ---@param connection function
 function isu.useEvent(eventName, connection)
     assertUsability('useEvent')
-    local ctx = getContext()
-    local current = ctx.events:next()
-    if not current then
-        ctx.events:push({ name = eventName, fn = connection })
-    else
-        current.connection:Disconnect()
+    local ctx = cget()
+    local current = ctx.evt:inc()
+    if current then
+        disconnect(current.connection)
         current.connection = nil
         current.fn = connection
+    else
+        ctx.evt:add({ name = eventName, fn = connection })
     end
 end
 
@@ -379,10 +369,10 @@ end
 ---@param tweenCalculator fun(newValue:any,onTransitionEnd:fun(callback:function))
 function isu.useTransition(propertyName, tweenCalculator)
     assertUsability('useTransition')
-    local ctx = getContext()
-    local current = ctx.transitions:next()
+    local ctx = cget()
+    local current = ctx.trs:inc()
     if not current then
-        ctx.transitions:push({name=propertyName, fn=tweenCalculator})
+        ctx.trs:add({name=propertyName, fn=tweenCalculator})
     end
 end
 
@@ -419,33 +409,19 @@ end
 ---@return fun(newValue:T)
 function isu.useAnimation(propertyName, tweenCalculator)
     assertUsability('useAnimation')
-    local ctx = getContext()
-    local current = ctx.animations:next()
-    if not current then
-        local anim
-        anim = {
-            name = propertyName,
-            fn = tweenCalculator,
-            perform = function(newValue)
-                ctx.animated[propertyName] = newValue
-            end
-        }
-        ctx.animations:push(anim)
-        return anim.perform
-    else
-        return current.perform
-    end
+    local ctx = cget()
+    return (ctx.anm:inc() or ctx.anm:add({
+        name = propertyName, fn = tweenCalculator,
+        perform = function(newValue)
+            ctx.ani[propertyName] = newValue
+        end
+    })).perform
 end
 
 local SUBSCRIPTION_MT = {
-    __type = 'Subscription',
+    tt = 'Subscription',
     __call = function(t, optional)
-        if not optional then
-            return t.value
-        else
-            t.represents.updater(optional)
-            return optional
-        end
+        return optional and t.represents.updater(optional) or t.value
     end
 }
 -- Creates a subscription-based stateful value. This hook serves as a more performant
@@ -483,29 +459,28 @@ local SUBSCRIPTION_MT = {
 ---@return fun(newValue?:T) @Updater-retriever. Calling it without an argument retrieves the value, and calling it with an argument updates the value.
 function isu.useSubscription(value)
     assertUsability('useSubscription')
-    local ctx = getContext()
-    local current, i = ctx.subscriptions:next()
+    local ctx = cget()
+    local current, i = ctx.sub:inc()
     if current then
         return current.proxy, current.updater
     else
-        local subscription = {}
-        subscription.listeners = {}
-        subscription.value = value
-        subscription.proxy = setmt({
+        local sub = {listeners = {}, value = value}
+        sub.proxy = setmt({
             value = value,
-            represents = subscription
+            represents = sub
         }, SUBSCRIPTION_MT)
-        subscription.updater = function(newValue)
-            if ctx.subscriptions:at(i).value ~= newValue then
-                subscription.value = newValue
-                subscription.proxy.value = newValue
-                for _, listener in pairs(subscription.listeners) do
+        sub.updater = function(newValue)
+            if ctx.sub:at(i).value ~= newValue then
+                sub.value = newValue
+                sub.proxy.value = newValue
+                for _, listener in next, sub.listeners do
                     listener(newValue)
                 end
             end
+            return newValue
         end
-        ctx.subscriptions:push(subscription)
-        return subscription.proxy, current.updater
+        ctx.sub:add(sub)
+        return sub.proxy, current.updater
     end
 end
 
@@ -514,7 +489,7 @@ end
 -- in functional components.
 ---@return function
 function isu.useTriggerableRender()
-    return getContext().render
+    return cget().render
 end
 
 -- Creates a component builder, which can be called to create new components
@@ -536,32 +511,32 @@ function isu.builder(instantiator, mutator, opts)
 
             local context = {
                 opts = opts,
-                prev = weakRef(nil),
+                prev = weakRef(),
                 props = props,
-                animated = {}
+                ani = {}
             }
 
-            if getContext() then
+            if cget() then
                 -- constructed within other component
-                local cctx = getContext()
-                local current = cctx.subcomponents:next()
+                local cctx = cget()
+                local current = cctx.sbc:inc()
                 if current then
                     current.props = props
                     return current.render
                 else
-                    cctx.subcomponents:push(context)
+                    cctx.sbc:add(context)
                 end
             end
 
-            for _, v in pairs(CONTEXT_ACCUMULATORS) do
-                context[v] = accumulator()
+            for i = 1, #CONTEXT_ACCUMULATORS do
+                context[CONTEXT_ACCUMULATORS[i]] = accumulator()
             end
 
             context.render = coroutine.wrap(function()
                 while true do
-                    coroutine.yield(withContext(context, function()
-                        for _, v in pairs(CONTEXT_ACCUMULATORS) do
-                            context[v]:reset()
+                    coroutine.yield(cuse(context, function()
+                        for i = 1, #CONTEXT_ACCUMULATORS do
+                            context[CONTEXT_ACCUMULATORS[i]]:rst()
                         end
 
                         local className, nprops = renderer(context.props)
@@ -575,9 +550,10 @@ function isu.builder(instantiator, mutator, opts)
                         -- An exception is made for the objects accumulator,
                         -- whose value is mediated by the mutator and not
                         -- by the renderer.
-                        for _, v in pairs(CONTEXT_ACCUMULATORS) do
-                            if v ~= 'objects' then
-                                context[v]:denote()
+                        for i = 1, #CONTEXT_ACCUMULATORS do
+                            local s = CONTEXT_ACCUMULATORS[i]
+                            if s ~= 'obj' then
+                                context[s]:frz()
                             end
                         end
 
@@ -585,19 +561,19 @@ function isu.builder(instantiator, mutator, opts)
                         mutator(inst, nprops)
                         if not context.prev.v or (not context.prev.v and hydrateThis) then
                             context.prev.v = inst
-                            for _, effect in pairs(context.effects.stack) do
+                            for _, effect in next, context.efc.stk do
                                 local unmounter = effect.fn()
-                                if unmounter and not context.unmounts:next() then
-                                    context.unmounts:push(unmounter)
+                                if unmounter and not context.unm:inc() then
+                                    context.unm:add(unmounter)
                                 end
                             end
                         end
 
                         if opts.useAnimation then
-                            context.animated = {}
+                            context.ani = {}
                         end
                         return inst
-                    end))
+                    end, true))
                 end
             end)
 
