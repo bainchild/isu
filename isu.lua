@@ -3,84 +3,28 @@
 -- https://github.com/ccreaper/isu
 
 -- Generic. Renamed because the minifier skip global-sounding names.
-local asrt = assert
-local getType = typeof or type
-local coroRunning = coroutine.running
-local unpk = table.unpack or unpack
-local nx = next
-local getmt = getmetatable
-local setmt = setmetatable
+local asrt, getType, coroRunning, nx, getmt, setmt, instanceNew, tweenService, connect =
+    assert,
+    typeof or type,
+    coroutine.running,
+    next,
+    getmetatable,
+    setmetatable,
+    Instance and Instance.new,
+    game and game:GetService("TweenService"),
+    game.Destroying.Connect
 
--- Roblox specific
-local instanceNew = Instance and Instance.new
-local tweenService = game and game:GetService("TweenService")
-local connect = game.Destroying.Connect
 local disconnect = connect(game.Destroying,function()end).Disconnect
 
 local isu = {}
 
 ---@class WeakTable
 ---@field v any
-local WEAK_MT_K = {__mode = 'k'}
-local WEAK_MT_V = {__mode = 'v'}
-local WEAK_MT_KV = {__mode = 'kv'}
-local CTX_STORAGE = setmt({}, WEAK_MT_K)
--- Creates a weak reference holder (weak table) and returns it.
--- Data is pointed to by `self.v`, but can be stored anywhere in the table.
----@param value any
----@return WeakTable
-local function weakRef(value)
-    return setmt({v = value}, WEAK_MT_V)
-end
-
--- Clones a table. If `deep` is truthy, all nested tables will be cloned too.
----@param t table
----@param deep? boolean
----@return table
-local function clone(t, deep)
-    local nt = {}
-    for key, delta in nx, t do
-        nt[key] = (getType(delta) == 'table' and deep) and clone(delta, deep) or delta
-    end
-    return nt
-end
 
 ---@class Accumulator
 ---@field stk table
 ---@return Accumulator
-local function accumulator()
-    return {
-        stk = {},
-        coro = setmt({}, WEAK_MT_KV),
-        rst = function(a)
-            a.coro[coroRunning()] = 0
-        end,
-        inc = function(a)
-            local running = coroRunning()
-            a.coro[running] = a.coro[running] + 1
-            return a:at(a.coro[running]), a.coro[running]
-        end,
-        frz = function(a)
-            asrt(not a.fi or a.fi == #a.stk, 'Variadic accumulation has been detected during composition. Make sure that you are not conditionally invoking hooks')
-            a.fi = #a.stk
-        end,
-        at = function(a, i)
-            return a.stk[i]
-        end,
-        set = function(a, i, v)
-            a.stk[i] = v
-        end,
-        add = function(a, v)
-            a.stk[#a.stk+1] = v
-            return v
-        end,
-    }
-end
 
-local CONTEXT_ACCUMULATORS = {
-    'obj', 'st', 'efc', 'unm', 'evt',
-    'trs', 'anm', 'sbc', 'sub'
-}
 ---@class Context
 ---@field prev WeakTable|nil Weak reference to the currently rendered object.
 ---@field props table Properties of the component. Can be mutated on renders.
@@ -95,25 +39,68 @@ local CONTEXT_ACCUMULATORS = {
 ---@field sbc Accumulator Nested components created at render time.
 ---@field sub Accumulator Subscription-based stateful variables.
 
--- Sets the coroutine's current context to def.
----@param def any Default value to set context to.
----@return Context
-local function cset(def)
-    local coro = coroRunning()
-    CTX_STORAGE[coro] = def
-    return CTX_STORAGE[coro]
+local WEAK_MT_K, WEAK_MT_V, WEAK_MT_KV, CTX_ACCUMULATORS, SUBSCRIPTION_MT =
+    {__mode = 'k'},
+    {__mode = 'v'},
+    {__mode = 'kv'},
+    { 'obj', 'st', 'efc', 'unm', 'evt',
+      'trs', 'anm', 'sbc', 'sub' },
+    { tt = 'Subscription',
+      __call = function(t, optional)
+        return optional and t.represents.updater(optional) or t.value
+      end
+    }
+
+local CTX_STORAGE = setmt({}, WEAK_MT_K)
+
+local function clone(t, deep)
+    local nt = {}
+    for key, delta in nx, t do
+        nt[key] = (getType(delta) == 'table' and deep) and clone(delta, deep) or delta
+    end
+    return nt
 end
 
--- Retrieves the context from the coroutine. Can be nil.
----@return Context|nil
-local function cget()
-    return CTX_STORAGE[coroRunning()]
-end
-
--- Calls `fn` with the supplied context `ctx`. Varargs are passed to `fn`.
----@param ctx Context
----@param fn function
----@vararg any
+local weakRef, accumulator, cset, cget =
+    function(value)
+        return setmt({v = value}, WEAK_MT_V)
+    end,
+    function()
+        return {
+            stk = {},
+            coro = setmt({}, WEAK_MT_KV),
+            rst = function(a)
+                a.coro[coroRunning()] = 0
+            end,
+            inc = function(a)
+                local running = coroRunning()
+                a.coro[running] = a.coro[running] + 1
+                return a:at(a.coro[running]), a.coro[running]
+            end,
+            frz = function(a)
+                asrt(not a.fi or a.fi == #a.stk, 'Variadic accumulation has been detected during composition. Make sure that you are not conditionally invoking hooks')
+                a.fi = #a.stk
+            end,
+            at = function(a, i)
+                return a.stk[i]
+            end,
+            set = function(a, i, v)
+                a.stk[i] = v
+            end,
+            add = function(a, v)
+                a.stk[#a.stk+1] = v
+                return v
+            end,
+        }
+    end,
+    function(def)
+        local coro = coroRunning()
+        CTX_STORAGE[coro] = def
+        return CTX_STORAGE[coro]
+    end,
+    function()
+        return CTX_STORAGE[coroRunning()]
+    end
 local function cuse(ctx, fn)
     local previous = cget()
     cset(ctx)
@@ -263,25 +250,7 @@ end
 ---@param value T
 ---@return T Value @The current value. Will update automatically after the updater has been called.
 ---@return fun(newValue:T) Updater @The stateful updater. Call this to update the state with a new value.
-function isu.useState(value)
-    local ctx = cget()
-    local current, i = ctx.st:inc()
-    if current then
-        return current.value, current.updater
-    else
-        local state
-        state = ctx.st:add({
-            value = value,
-            updater = function(newValue)
-                if ctx.st:at(i).value ~= newValue then
-                    state.value = newValue
-                    ctx.render()
-                end
-            end
-        })
-        return state.value, state.updater
-    end
-end
+isu.useState,
 
 -- Applies lifecycle hooks to the current component based on `fn`'s behavior.
 -- If no states are supplied, then the callback will be invoked when the component is first rendered,
@@ -291,20 +260,7 @@ end
 -- For more information: https://reactjs.org/docs/hooks-reference.html#useeffect
 ---@param fn function
 ---@param states? any[]
-function isu.useEffect(fn, states)
-    local ctx = cget()
-    local current = ctx.efc:inc()
-    if not current then
-        ctx.efc:add({fn=fn,states=states or {}})
-    elseif states then
-        for i = 1, #states do
-            if current.st[i] ~= states[i] then
-                current.fn()
-                break
-            end
-        end
-    end
-end
+isu.useEffect,
 
 -- Connects `callback` to the constructed object's event named `eventName`.
 -- The event must be directly indexable using the supplied name (for instance,
@@ -322,18 +278,7 @@ end
 -- ```
 ---@param eventName string
 ---@param connection function
-function isu.useEvent(eventName, connection)
-    assertUsability('useEvent')
-    local ctx = cget()
-    local current = ctx.evt:inc()
-    if current then
-        disconnect(current.connection)
-        current.connection = nil
-        current.fn = connection
-    else
-        ctx.evt:add({ name = eventName, fn = connection })
-    end
-end
+isu.useEvent,
 
 -- Subjects an instance property to a transition (such as a tween) when it is
 -- mutated by the reconciliation/diffing process. `tweenCalculator` must be a
@@ -352,14 +297,7 @@ end
 -- ```
 ---@param propertyName string
 ---@param tweenCalculator fun(newValue:any,onTransitionEnd:fun(callback:function))
-function isu.useTransition(propertyName, tweenCalculator)
-    assertUsability('useTransition')
-    local ctx = cget()
-    local current = ctx.trs:inc()
-    if not current then
-        ctx.trs:add({name=propertyName, fn=tweenCalculator})
-    end
-end
+isu.useTransition,
 
 -- Returns a function that animates a property upon invocation. `useAnimation`
 -- accepts the same arguments as `useTransition` and their behavior is the same,
@@ -392,23 +330,9 @@ end
 ---@param propertyName string
 ---@param tweenCalculator fun(newValue:any,onTransitionEnd:fun(callback:function))
 ---@return fun(newValue:T)
-function isu.useAnimation(propertyName, tweenCalculator)
-    assertUsability('useAnimation')
-    local ctx = cget()
-    return (ctx.anm:inc() or ctx.anm:add({
-        name = propertyName, fn = tweenCalculator,
-        perform = function(newValue)
-            ctx.ani[propertyName] = newValue
-        end
-    })).perform
-end
+isu.useAnimation,
 
-local SUBSCRIPTION_MT = {
-    tt = 'Subscription',
-    __call = function(t, optional)
-        return optional and t.represents.updater(optional) or t.value
-    end
-}
+
 -- Creates a subscription-based stateful value. This hook serves as a more performant
 -- alternative to `useState` when the value only needs to be accessed and updated within another
 -- hook (such as `useEvent` or `useEffect`) and not within the renderer function directly.
@@ -442,7 +366,92 @@ local SUBSCRIPTION_MT = {
 ---@generic T
 ---@param value any
 ---@return fun(newValue?:T) @Updater-retriever. Calling it without an argument retrieves the value, and calling it with an argument updates the value.
-function isu.useSubscription(value)
+isu.useSubscription,
+
+-- Returns a callback that re-renders the component when invoked.
+-- Avoids React's [forced re-render problem](https://stackoverflow.com/questions/46240647/react-how-to-force-a-function-component-to-render/53837442)
+-- in functional components.
+---@return function
+isu.useTriggerableRender,
+
+-- Creates a component builder, which can be called to create new components
+-- with a renderer and hooks. The library uses the builder to construct the
+-- Instance component factory at `isu.component`.
+---@param instantiator function @This function must accept a class name and a dictionary of properties at minimum. The table can also include an array part composed of subcomponents, but this behavior may be safely ignored if not relevant.
+---@param mutator function @This function is used to mutate an existing object. It must accept the instance to mutate and a dictionary of properties to assign. A common optimization is to only assign a property if its value has changed.
+---@param opts? table @You can enable special hooks (such as `useEvent` and `useAnimation`) by setting them to true in this table (`["useEvent"] = true`). Essential hooks such as `useState` and `useEffect` are always available.
+---@return function
+isu.builder =
+
+function(value)
+    local ctx = cget()
+    local current, i = ctx.st:inc()
+    if current then
+        return current.value, current.updater
+    else
+        local state
+        state = ctx.st:add({
+            value = value,
+            updater = function(newValue)
+                if ctx.st:at(i).value ~= newValue then
+                    state.value = newValue
+                    ctx.render()
+                end
+            end
+        })
+        return state.value, state.updater
+    end
+end,
+
+function(fn, states)
+    local ctx = cget()
+    local current = ctx.efc:inc()
+    if not current then
+        ctx.efc:add({fn=fn,states=states or {}})
+    elseif states then
+        for i = 1, #states do
+            if current.st[i] ~= states[i] then
+                current.fn()
+                break
+            end
+        end
+    end
+end,
+
+function(eventName, connection)
+    assertUsability('useEvent')
+    local ctx = cget()
+    local current = ctx.evt:inc()
+    if current then
+        disconnect(current.connection)
+        current.connection = nil
+        current.fn = connection
+    else
+        ctx.evt:add({ name = eventName, fn = connection })
+    end
+end,
+
+function(propertyName, tweenCalculator)
+    assertUsability('useTransition')
+    local ctx = cget()
+    local current = ctx.trs:inc()
+    if not current then
+        ctx.trs:add({name=propertyName, fn=tweenCalculator})
+    end
+end,
+
+function(propertyName, tweenCalculator)
+    assertUsability('useAnimation')
+    local ctx = cget()
+    return (ctx.anm:inc() or ctx.anm:add({
+        name = propertyName, fn = tweenCalculator,
+        perform = function(newValue)
+            ctx.ani[propertyName] = newValue
+        end
+    })).perform
+end,
+
+function(value)
     assertUsability('useSubscription')
     local ctx = cget()
     local current, i = ctx.sub:inc()
@@ -467,24 +476,13 @@ function isu.useSubscription(value)
         ctx.sub:add(sub)
         return sub.proxy, current.updater
     end
-end
+end,
 
--- Returns a callback that re-renders the component when invoked.
--- Avoids React's [forced re-render problem](https://stackoverflow.com/questions/46240647/react-how-to-force-a-function-component-to-render/53837442)
--- in functional components.
----@return function
-function isu.useTriggerableRender()
+function()
     return cget().render
-end
+end,
 
--- Creates a component builder, which can be called to create new components
--- with a renderer and hooks. The library uses the builder to construct the
--- Instance component factory at `isu.component`.
----@param instantiator function @This function must accept a class name and a dictionary of properties at minimum. The table can also include an array part composed of subcomponents, but this behavior may be safely ignored if not relevant.
----@param mutator function @This function is used to mutate an existing object. It must accept the instance to mutate and a dictionary of properties to assign. A common optimization is to only assign a property if its value has changed.
----@param opts? table @You can enable special hooks (such as `useEvent` and `useAnimation`) by setting them to true in this table (`["useEvent"] = true`). Essential hooks such as `useState` and `useEffect` are always available.
----@return function
-function isu.builder(instantiator, mutator, opts)
+function(instantiator, mutator, opts)
     opts = opts or {}
     -- returns a factory which can be made
     -- to build a component from props
@@ -511,15 +509,15 @@ function isu.builder(instantiator, mutator, opts)
                 end
             end
 
-            for i = 1, #CONTEXT_ACCUMULATORS do
-                context[CONTEXT_ACCUMULATORS[i]] = accumulator()
+            for i = 1, #CTX_ACCUMULATORS do
+                context[CTX_ACCUMULATORS[i]] = accumulator()
             end
 
             context.render = coroutine.wrap(function()
                 while true do
                     coroutine.yield(cuse(context, function()
-                        for i = 1, #CONTEXT_ACCUMULATORS do
-                            context[CONTEXT_ACCUMULATORS[i]]:rst()
+                        for i = 1, #CTX_ACCUMULATORS do
+                            context[CTX_ACCUMULATORS[i]]:rst()
                         end
 
                         local className, nprops = renderer(context.props)
@@ -531,8 +529,8 @@ function isu.builder(instantiator, mutator, opts)
                         -- An exception is made for the objects accumulator,
                         -- whose value is mediated by the mutator and not
                         -- by the renderer.
-                        for i = 1, #CONTEXT_ACCUMULATORS do
-                            local s = CONTEXT_ACCUMULATORS[i]
+                        for i = 1, #CTX_ACCUMULATORS do
+                            local s = CTX_ACCUMULATORS[i]
                             if s ~= 'obj' then
                                 context[s]:frz()
                             end
