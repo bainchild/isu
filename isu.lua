@@ -2,12 +2,12 @@
 -- isu: a minimal, lightweight library for building reactive user interfaces in the Roblox engine.
 -- https://github.com/ccreaper/isu
 
--- Generic
-local assert = assert
+-- Generic. Renamed because the minifier skip global-sounding names.
+local asrt = assert
 local getType = typeof or type
 local coroRunning = coroutine.running
-local unpack = table.unpack or unpack
-local next = next
+local unpk = table.unpack or unpack
+local nx = next
 local getmt = getmetatable
 local setmt = setmetatable
 
@@ -21,11 +21,10 @@ local isu = {}
 
 ---@class WeakTable
 ---@field v any
-
 local WEAK_MT_K = {__mode = 'k'}
 local WEAK_MT_V = {__mode = 'v'}
 local WEAK_MT_KV = {__mode = 'kv'}
-local _contextStorage = setmt({}, WEAK_MT_K)
+local CTX_STORAGE = setmt({}, WEAK_MT_K)
 -- Creates a weak reference holder (weak table) and returns it.
 -- Data is pointed to by `self.v`, but can be stored anywhere in the table.
 ---@param value any
@@ -40,15 +39,8 @@ end
 ---@return table
 local function clone(t, deep)
     local nt = {}
-    for key, delta in next, t do
-        local nK, nD = key, delta
-        if getType(key) == 'table' and deep then
-            nK = clone(key, deep)
-        end
-        if getType(delta) == 'table' and deep then
-            nD = clone(delta, deep)
-        end
-        nt[nK] = nD
+    for key, delta in nx, t do
+        nt[key] = (getType(delta) == 'table' and deep) and clone(delta, deep) or delta
     end
     return nt
 end
@@ -69,11 +61,7 @@ local function accumulator()
             return a:at(a.coro[running]), a.coro[running]
         end,
         frz = function(a)
-            if a.fi then
-                if a.fi ~= #a.stk then
-                    return error('Variadic accumulation has been detected during composition. Make sure that you are not conditionally invoking hooks (for instance, within an if statement).', 2)
-                end
-            end
+            asrt(not a.fi or a.fi == #a.stk, 'Variadic accumulation has been detected during composition. Make sure that you are not conditionally invoking hooks')
             a.fi = #a.stk
         end,
         at = function(a, i)
@@ -112,42 +100,39 @@ local CONTEXT_ACCUMULATORS = {
 ---@return Context
 local function cset(def)
     local coro = coroRunning()
-    _contextStorage[coro] = def
-    return _contextStorage[coro]
+    CTX_STORAGE[coro] = def
+    return CTX_STORAGE[coro]
 end
 
 -- Retrieves the context from the coroutine. Can be nil.
 ---@return Context|nil
 local function cget()
-    return _contextStorage[coroRunning()]
+    return CTX_STORAGE[coroRunning()]
 end
 
 -- Calls `fn` with the supplied context `ctx`. Varargs are passed to `fn`.
 ---@param ctx Context
 ---@param fn function
 ---@vararg any
-local function cuse(ctx, fn, preserverts)
+local function cuse(ctx, fn)
     local previous = cget()
     cset(ctx)
-    local result = {fn()}
+    local result = fn()
     cset(previous)
-    return preserverts and unpack(result)
+    return result
 end
 
 -- Verifies if a hook is enabled in this component.
 local function assertUsability(hookName)
     local c = cget()
-    return (
-        c.opts[hookName] or
-        c.opts['enableAll']
-    ) or error('"' .. hookName .. '" is not enabled in this component builder.')
+    asrt(c.opts[hookName] or c.opts.all, '"' .. hookName .. '" is not enabled in this component builder')
 end
 
 local makeInstance
 do --> context-aware instance creation
     local function make(className, properties)
         local inst = getType(className) == 'Instance' and className or instanceNew(className)
-        for key, delta in next, properties do
+        for key, delta in nx, properties do
             if getType(key) == 'number' then
                 delta().Parent = inst
             else
@@ -168,7 +153,7 @@ do --> context-aware instance creation
     ---@param properties table
     ---@return Instance
     function makeInstance(className, properties)
-        assert(instanceNew, 'Instance creation is not supported.')
+        asrt(instanceNew, 'Instance creation is not supported.')
         local ctx = cget()
         local current = ctx.obj:inc()
         if not current then
@@ -176,12 +161,12 @@ do --> context-aware instance creation
             current = make(className, properties)
             ctx.obj:add(current)
             connect(current.Destroying, function()
-                for _, unmounter in next, ctx.unm.stk do
+                for _, unmounter in nx, ctx.unm.stk do
                     unmounter()
                 end
             end)
         end
-        for _, event in next, ctx.evt.stk do
+        for _, event in nx, ctx.evt.stk do
             event.connection = connect(current[event.name], event.fn)
         end
         return current
@@ -199,7 +184,7 @@ end
 ---@param transition Transition
 ---@return boolean
 local function performTransition(instance, property, toValue, transition)
-    assert(tweenService, 'Tweening is not supported.')
+    asrt(tweenService, 'Tweening is not supported.')
 
     local onEnd
     local function useTransitionComplete(endFn)
@@ -223,7 +208,7 @@ end
 ---@param new table
 ---@return Instance
 local function mutateConditionally(src, new)
-    for key, delta in next, new do
+    for key, delta in nx, new do
         if getType(key) ~= 'number' then
             local ctx = cget()
             local t1, t2 = getType(src[key]), getType(delta)
@@ -244,7 +229,7 @@ local function mutateConditionally(src, new)
                 -- mutate due to differing types
                 src[key] = delta
             elseif ctx.ani[key] then
-                for _, v in next, ctx.anm.stk do
+                for _, v in nx, ctx.anm.stk do
                     if v.name == key then
                         performTransition(src, key, ctx.ani[key], v)
                     end
@@ -252,7 +237,7 @@ local function mutateConditionally(src, new)
             elseif src[key] ~= delta then
                 -- mutate on differing values
                 local hast = {}
-                for _, v in next, ctx.trs.stk do
+                for _, v in nx, ctx.trs.stk do
                     if v.name == key then
                         hast[key] = performTransition(src, key, delta, v)
                     end
@@ -473,7 +458,7 @@ function isu.useSubscription(value)
             if ctx.sub:at(i).value ~= newValue then
                 sub.value = newValue
                 sub.proxy.value = newValue
-                for _, listener in next, sub.listeners do
+                for _, listener in nx, sub.listeners do
                     listener(newValue)
                 end
             end
@@ -505,9 +490,7 @@ function isu.builder(instantiator, mutator, opts)
     -- to build a component from props
     return function(renderer, hydrateThis)
         return function(props)
-            if not opts.hydration and hydrateThis then
-                return error('Hydration not enabled in builder options.')
-            end
+            asrt(not opts.hydration or hydrateThis, 'Hydration requires object parameter.')
 
             local context = {
                 opts = opts,
@@ -540,9 +523,7 @@ function isu.builder(instantiator, mutator, opts)
                         end
 
                         local className, nprops = renderer(context.props)
-                        if getType(className) ~= 'string' or getType(nprops) ~= 'table' then
-                            error('Component renderer must return a classname and properties.')
-                        end
+                        asrt(getType(className) == 'string' and getType(nprops) == 'table', 'Fenderer must return a classname and properties')
 
                         -- Can detect varadic (conditional) hook use.
                         -- Error if the current hook counts aren't similar
@@ -561,7 +542,7 @@ function isu.builder(instantiator, mutator, opts)
                         mutator(inst, nprops)
                         if not context.prev.v or (not context.prev.v and hydrateThis) then
                             context.prev.v = inst
-                            for _, effect in next, context.efc.stk do
+                            for _, effect in nx, context.efc.stk do
                                 local unmounter = effect.fn()
                                 if unmounter and not context.unm:inc() then
                                     context.unm:add(unmounter)
@@ -573,7 +554,7 @@ function isu.builder(instantiator, mutator, opts)
                             context.ani = {}
                         end
                         return inst
-                    end, true))
+                    end))
                 end
             end)
 
@@ -583,7 +564,7 @@ function isu.builder(instantiator, mutator, opts)
 end
 
 local INSTANCE_BUILDER = isu.builder(makeInstance, mutateConditionally, {
-    enableAll = true -- enable all hooks on instances
+    all = true -- enable all hooks on instances
 })
 -- Creates a new component and returns its factory, a function used to construct
 -- component instances. Calling the factory instanciates a component with an initial
@@ -613,7 +594,7 @@ end
 
 local INSTANCE_HYDRATE = isu.builder(makeInstance, mutateConditionally, {
     hydration = true, -- enable hydration for this builder
-    enableAll = true -- enable all hooks on instances
+    all = true -- enable all hooks on instances
 })
 -- Hydrates (updates) an already existing object with the renderer instead of
 -- creating one. Initial properties can also be provided. Otherwise, behavior
