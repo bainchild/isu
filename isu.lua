@@ -561,7 +561,10 @@ function(instantiator, mutator, opts)
     end
 end
 
-local INSTANCE_BUILDER = isu.builder(makeInstance, mutateConditionally, {
+local INSTANCE_BUILDER, INSTANCE_HYDRATE = isu.builder(makeInstance, mutateConditionally, {
+    all = true -- enable all hooks on instances
+}), isu.builder(makeInstance, mutateConditionally, {
+    hydration = true, -- enable hydration for this builder
     all = true -- enable all hooks on instances
 })
 -- Creates a new component and returns its factory, a function used to construct
@@ -586,14 +589,8 @@ local INSTANCE_BUILDER = isu.builder(makeInstance, mutateConditionally, {
 ---@generic Props any
 ---@param renderer fun(props:Props):string,table
 ---@return fun(props:Props):fun():Instance
-function isu.component(renderer)
-    return INSTANCE_BUILDER(renderer)
-end
+isu.component,
 
-local INSTANCE_HYDRATE = isu.builder(makeInstance, mutateConditionally, {
-    hydration = true, -- enable hydration for this builder
-    all = true -- enable all hooks on instances
-})
 -- Hydrates (updates) an already existing object with the renderer instead of
 -- creating one. Initial properties can also be provided. Otherwise, behavior
 -- is the exact same as the component factory, but returns nothing.
@@ -605,7 +602,13 @@ local INSTANCE_HYDRATE = isu.builder(makeInstance, mutateConditionally, {
 ---@param object Instance
 ---@param renderer function
 ---@param props? table
-function isu.hydrate(object, renderer, props)
+isu.hydrate =
+
+function(renderer)
+    return INSTANCE_BUILDER(renderer)
+end,
+
+function(object, renderer, props)
     INSTANCE_HYDRATE(renderer, object)(props)()
 end
 
