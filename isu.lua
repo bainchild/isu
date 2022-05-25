@@ -3,18 +3,17 @@
 -- https://github.com/ccreaper/isu
 
 -- Generic. Renamed because the minifier skip global-sounding names.
-local asrt, getType, coroRunning, nx, getmt, setmt, instanceNew, tweenService, connect =
+local asrt, getType, coroRunning, nx, setmt, instanceNew, tweenService, connect =
     assert,
-    typeof or type,
+    type,
     coroutine.running,
     next,
-    getmetatable,
     setmetatable,
     Instance and Instance.new,
     game and game:GetService("TweenService"),
-    game.Destroying.Connect
+    game.Close.Connect
 
-local disconnect = connect(game.Destroying,function()end).Disconnect
+local disconnect = connect(game.Close,function()end).Disconnect
 
 local isu = {}
 
@@ -45,8 +44,7 @@ local WEAK_MT_K, WEAK_MT_V, WEAK_MT_KV, CTX_ACCUMULATORS, SUBSCRIPTION_MT =
     {__mode = 'kv'},
     { 'obj', 'st', 'efc', 'unm', 'evt',
       'trs', 'anm', 'sbc', 'sub' },
-    { tt = 'Subscription',
-      __call = function(t, optional)
+    { __call = function(t, optional)
         return optional and t.represents.updater(optional) or t.value
       end
     }
@@ -112,52 +110,38 @@ end
 -- Verifies if a hook is enabled in this component.
 local function assertUsability(hookName)
     local c = cget()
-    asrt(c.opts[hookName] or c.opts.all, '"' .. hookName .. '" is not enabled in this component builder')
+    asrt(c.opts[hookName] or c.opts.all, '"' .. hookName .. '" is not enabled.')
 end
 
-local makeInstance
-do --> context-aware instance creation
-    local function make(className, properties)
-        local inst = getType(className) == 'Instance' and className or instanceNew(className)
-        for key, delta in nx, properties do
+-- Contextually constructs an instance with the provided properties.
+-- If the current context has a listing for this instance, it will be returned instead of instancing a new object.
+---@param className string
+---@param properties table
+---@return Instance
+function makeInstance(className, properties)
+    asrt(instanceNew, 'Instance creation is not supported.')
+    local ctx = cget()
+    local current = ctx.obj:inc()
+    if not current then
+        current = getType(className) == 'userdata' and className or instanceNew(className)
+        for key, delta in nx, properties or {} do
             if getType(key) == 'number' then
-                delta().Parent = inst
+                delta().Parent = current
             else
-                local t = getType(delta) == 'table' and getmt(delta)
-                if t and t.tt == 'Subscription' then
-                    inst[key] = delta.value
-                else
-                    inst[key] = delta
-                end
+                current[key] = (getType(delta) == 'table' and delta._sub) and delta.value or delta
             end
         end
-        return inst
+        ctx.obj:add(current)
+        connect(current.Destroying, function()
+            for _, unmounter in nx, ctx.unm.stk do
+                unmounter()
+            end
+        end)
     end
-
-    -- Contextually constructs an instance with the provided properties.
-    -- If the current context has a listing for this instance, it will be returned instead of instancing a new object.
-    ---@param className string
-    ---@param properties table
-    ---@return Instance
-    function makeInstance(className, properties)
-        asrt(instanceNew, 'Instance creation is not supported.')
-        local ctx = cget()
-        local current = ctx.obj:inc()
-        if not current then
-            properties = properties or {}
-            current = make(className, properties)
-            ctx.obj:add(current)
-            connect(current.Destroying, function()
-                for _, unmounter in nx, ctx.unm.stk do
-                    unmounter()
-                end
-            end)
-        end
-        for _, event in nx, ctx.evt.stk do
-            event.connection = connect(current[event.name], event.fn)
-        end
-        return current
+    for _, event in nx, ctx.evt.stk do
+        event.connection = connect(current[event.name], event.fn)
     end
+    return current
 end
 
 ---@class Transition
@@ -201,14 +185,11 @@ local function mutateConditionally(src, new)
             local t1, t2 = getType(src[key]), getType(delta)
             if t2 == 'table' then
                 -- check if special object
-                local mt = getmt(delta)
-                if mt and mt.tt then
-                    if mt.tt == 'Subscription' then
-                        delta.represents.listeners[key] = function(newValue)
-                            src[key] = newValue
-                        end
-                        src[key] = delta.value
+                if delta._sub then
+                    delta.represents.listeners[key] = function(newValue)
+                        src[key] = newValue
                     end
+                    src[key] = delta.value
                 else
                     src[key] = delta
                 end
@@ -458,7 +439,7 @@ function(value)
     if current then
         return current.proxy, current.updater
     else
-        local sub = {listeners = {}, value = value}
+        local sub = {listeners = {}, value = value, _sub=true}
         sub.proxy = setmt({
             value = value,
             represents = sub
