@@ -1,7 +1,18 @@
 <p align='center'>
-  <img size='200x200' src="https://i.imgur.com/s0zmkyV.png" alt="Logo of isu" width="274" height="157"/><br/>
-  <b>isu</b>: a minimal, lightweight library for building reactive user interfaces in the Roblox engine.
+  	<img size='200x200' src="https://i.imgur.com/s0zmkyV.png" alt="Logo of isu" width="274" height="157"/><br/>
+	<a href="https://github.com/ccreaper/isu/releases">
+    	<img src="https://img.shields.io/github/v/release/ccreaper/isu?label=version"/>
+	</a>
+	<a href="https://github.com/ccreaper/isu/blob/main/isu.min.lua">
+		<img src="https://img.shields.io/github/size/ccreaper/isu/isu.min.lua?logo=lua">
+	</a>
+	<a href="https://github.com/ccreaper/isu/blob/master/LICENSE">
+        <img src="https://img.shields.io/github/license/ccreaper/isu"/>
+    </a>
+	<br/>
+  	<b>isu</b>: a minimal, lightweight library for building reactive user interfaces in the Roblox engine.
 </p>
+<hr/>
 
 ## Overview
 - isu is **minimal**. Building and rendering reactive components can be done with an extremely minimal number of calls.
@@ -44,7 +55,7 @@ You can read the in-depth introduction, further examples and the API reference [
 - [x] Triggerable animations through `useAnimation`.
 - [x] Subscription hooks such as `useSubscription` to create stateful derivable values that does not need the renderer to have an effect, such as when the value is used exclusively as an Instance property.
 - [ ] Sequential animations by returning a list of transitions in `useTransition`.
-- [ ] Proper documentation hosted on Github Pages
+- [x] Proper documentation hosted on Github Pages
 
 ## History
 I initially wrote `isu` as a way to fix some of the problems I personally had with [Roact](https://github.com/Roblox/roact) and [Fusion](https://github.com/Elttob/Fusion), as well as to quell my personal disagreement with some of their design choices. Even though I found Fusion to be much closer to what I wanted from a reactive framework, it doesn't use anything contextual for reconciliation and reactivity, instead relying on data structures such as `Computed` that are not associated by design to their rendered components. For better or for worse, I opted into designing a library that was far closer to React in usage, and that yielded `isu`.
