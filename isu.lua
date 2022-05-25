@@ -76,7 +76,7 @@ local weakRef, accumulator, cset, cget =
                 return a:at(a.coro[running]), a.coro[running]
             end,
             frz = function(a)
-                asrt(not a.fi or a.fi == #a.stk, 'Variadic accumulation has been detected during composition. Make sure that you are not conditionally invoking hooks')
+                asrt(not a.fi or a.fi == #a.stk, "Conditional hooks aren't allowed.")
                 a.fi = #a.stk
             end,
             at = function(a, i)
