@@ -502,7 +502,7 @@ function(instantiator, mutator, opts)
                         end
 
                         local className, nprops = renderer(context.props)
-                        asrt(getType(className) == 'string' and getType(nprops) == 'table', 'Fenderer must return a classname and properties')
+                        asrt(getType(className) == 'string' and getType(nprops) == 'table', 'Renderer must return a class and properties')
 
                         -- Can detect varadic (conditional) hook use.
                         -- Error if the current hook counts aren't similar
