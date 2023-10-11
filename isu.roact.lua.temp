@@ -1,0 +1,69 @@
+
+-- isu: a minimal, lightweight library for building reactive user interfaces in the Roblox engine.
+-- This is the compatibility library for Roact. Uses a lot of Roblox functions.
+-- https://github.com/ccreaper/isu
+
+local tt = typeof or type
+local nx = next
+
+local isu = nil
+local compatRoact = {}
+
+local function unimpl(field)
+    assert(false, "TODO: implement Roact."..field)
+end
+
+---@diagnostic disable-next-line: unused-local
+function compatRoact.createElement(component, props, children) --> RoactElement
+    unimpl("createElement")
+end
+
+---@diagnostic disable-next-line: unused-local
+function compatRoact.createFragment(elements) --> RoactFragment
+    unimpl("createFragment")
+end
+
+---@diagnostic disable-next-line: unused-local
+function compatRoact.mount(element, parent, key) --> RoactTree
+    unimpl("mount")
+end
+
+---@diagnostic disable-next-line: unused-local
+function compatRoact.update(tree, element) --> RoactTree
+    unimpl("update")
+end
+
+---@diagnostic disable-next-line: unused-local
+function compatRoact.unmount(tree)
+    unimpl("unmount")
+end
+
+function compatRoact.oneChild(children) --> RoactElement | nil
+    if not children then
+        return nil
+    end
+    local key, child = next(children)
+    if not child then
+        return nil
+    end
+    local after = next(children, key)
+    if after then
+        error("Expected at most child, had more than one child.", 2)
+    end
+    return child
+end
+
+local binding = {}
+binding.__index = binding
+function binding.new()
+
+end
+
+function compatRoact.createBinding(init) --> binding, update
+    return binding.new(init)
+end
+
+return function(isuLibrary)
+    isu = isuLibrary
+    return compatRoact
+end
