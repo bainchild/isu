@@ -11,9 +11,9 @@ local asrt, getType, coroRunning, nx, setmt, instanceNew, tweenService, connect 
     setmetatable,
     Instance and Instance.new,
     game and game:GetService("TweenService"),
-    game.Close.Connect
+    game and game.Close.Connect
 
-local disconnect = connect(game.Close,function()end).Disconnect
+local disconnect = game and connect(game.Close,function()end).Disconnect
 
 local isu = {}
 
@@ -51,13 +51,13 @@ local WEAK_MT_K, WEAK_MT_V, WEAK_MT_KV, CTX_ACCUMULATORS, SUBSCRIPTION_MT =
 
 local CTX_STORAGE = setmt({}, WEAK_MT_K)
 
-local function clone(t, deep)
-    local nt = {}
-    for key, delta in nx, t do
-        nt[key] = (getType(delta) == 'table' and deep) and clone(delta, deep) or delta
-    end
-    return nt
-end
+-- local function clone(t, deep)
+--     local nt = {}
+--     for key, delta in nx, t do
+--         nt[key] = (getType(delta) == 'table' and deep) and clone(delta, deep) or delta
+--     end
+--     return nt
+-- end
 
 local weakRef, accumulator, cset, cget =
     function(value)
@@ -118,7 +118,7 @@ end
 ---@param className string
 ---@param properties table
 ---@return Instance
-function makeInstance(className, properties)
+local function makeInstance(className, properties)
     asrt(instanceNew, 'Instance creation is not supported.')
     local ctx = cget()
     local current = ctx.obj:inc()
