@@ -1,3 +1,4 @@
+(forked from an account that no longer exists, a synapse developer if I remember correctly)
 <p align='center'>
   	<img size='200x200' src="https://i.imgur.com/s0zmkyV.png" alt="Logo of isu" width="274" height="157"/><br/>
 	<a href="https://github.com/ccreaper/isu/releases">
