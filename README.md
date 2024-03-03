@@ -1,14 +1,14 @@
-(forked from an account that no longer exists, a synapse developer if I remember correctly)
+(forked from an account that no longer exists, named "ccreaper", a synapse developer if I remember correctly)
 <p align='center'>
   	<img size='200x200' src="https://i.imgur.com/s0zmkyV.png" alt="Logo of isu" width="274" height="157"/><br/>
-	<a href="https://github.com/ccreaper/isu/releases">
-    	<img src="https://img.shields.io/github/v/release/ccreaper/isu?label=version"/>
+	<a href="https://github.com/bainchild/isu/releases">
+    	<img src="https://img.shields.io/github/v/release/bainchild/isu?label=version"/>
 	</a>
-	<a href="https://github.com/ccreaper/isu/blob/main/isu.min.lua">
-		<img src="https://img.shields.io/github/size/ccreaper/isu/isu.min.lua?logo=lua">
+	<a href="https://github.com/bainchild/isu/blob/main/isu.min.lua">
+		<img src="https://img.shields.io/github/size/bainchild/isu/isu.min.lua?logo=lua">
 	</a>
-	<a href="https://github.com/ccreaper/isu/blob/master/LICENSE">
-        <img src="https://img.shields.io/github/license/ccreaper/isu"/>
+	<a href="https://github.com/bainchild/isu/blob/master/LICENSE">
+        <img src="https://img.shields.io/github/license/bainchild/isu"/>
     </a>
 	<br/>
   	<b>isu</b>: a minimal, lightweight library for building reactive user interfaces in the Roblox engine.
@@ -45,7 +45,7 @@ end)
 
 counter()().Parent = script.Parent
 ```
-You can read the in-depth introduction, further examples and the API reference [here](https://ccreaper.github.io/isu/).
+You can read the in-depth introduction, further examples and the API reference [here](https://bainchild.github.io/isu/).
 
 ## Roadmap
 - [x] Functional stateful components powered by contexual coroutines.
